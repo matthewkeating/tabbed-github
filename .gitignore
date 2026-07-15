@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Throwaway source image fed to `tauri icon`
+scratch-icon.png
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,7 +1,27 @@
-# Tauri + Vanilla TS
+# GitHub
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Typescript.
+A native macOS app that puts GitHub in system tabs (⌘T for a new tab).
+Links to GitHub stay in the app; everything else opens in your default browser.
 
-## Recommended IDE Setup
+## Prerequisites
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+[Rust](https://rustup.rs) and [pnpm](https://pnpm.io).
+
+## Develop
+
+```sh
+pnpm install
+pnpm tauri dev
+```
+
+## Build
+
+```sh
+pnpm tauri build --bundles app
+```
+
+The packaged app is written to:
+
+```
+src-tauri/target/release/bundle/macos/GitHub.app
+```
