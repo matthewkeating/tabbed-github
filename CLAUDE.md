@@ -4,14 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A native macOS app (Tauri v2) that wraps GitHub in system tabs. There is almost **no frontend** — each tab is its own native `WebviewWindow` that loads `github.com` directly, and all application logic lives in Rust in `src-tauri/src/lib.rs`. The one real HTML page is `frontend/settings.html`, a small settings window for configuring global hotkeys.
+A native macOS app (Tauri v2) that wraps a website in system tabs. There is almost **no frontend** — each tab is its own native `WebviewWindow` that loads the site directly, and all application logic lives in Rust in `src-tauri/src/lib.rs`. The one real HTML page is `frontend/settings.html`, a small settings window for configuring global hotkeys.
+
+**One codebase, two apps.** The same source ships as two products — **GitHub** (default) and **Gemini** — that differ only in a small compile-time `Site` profile. All logic and fixes live once; only per-site data (URL, in-app host list, name, bundle id, icons) varies. See "Multi-site builds" below.
 
 ## Commands
 
 ```sh
 pnpm install                        # install the Tauri CLI (only JS dependency)
-pnpm tauri dev                      # run the app in development
-pnpm tauri build --bundles app      # build → src-tauri/target/release/bundle/macos/GitHub.app
+pnpm tauri dev                      # run the GitHub app in development
+pnpm dev:gemini                     # run the Gemini app in development
+pnpm tauri build --bundles app      # build GitHub → target/release/bundle/macos/GitHub.app
+pnpm deploy                         # build + install GitHub.app to ~/Applications
+pnpm deploy:gemini                  # build + install Gemini.app to ~/Applications
+```
+
+To build the Gemini app manually, pass its Cargo feature and config overrides:
+
+```sh
+pnpm tauri build --bundles app --features gemini --config src-tauri/tauri.gemini.conf.json
 ```
 
 Rust-only iteration (faster than a full `tauri dev` cycle when you just want to check the crate compiles):
@@ -26,7 +37,9 @@ There are no tests or linters configured.
 
 The whole app is `src-tauri/src/lib.rs` (invoked via the thin `main.rs`). `frontend/index.html` exists only to satisfy Tauri's required `frontendDist` and is never displayed.
 
-**Tabs are windows.** Each tab is a separate `WebviewWindow` created by `create_tab`, all sharing the `TABBING_IDENTIFIER` so macOS folds them into one native tab bar. On macOS, `create_tab` explicitly calls `add_as_tab` (raw `objc` `addTabbedWindow:ordered:`) to attach the new window to the focused one, because the tabbing identifier alone only merges windows when the system "Prefer tabs" setting is on. Tab labels are `tab-N` from the monotonic `TabCounter`.
+**Multi-site builds.** All per-site data lives in one `Site` struct at the top of `lib.rs` (`start_url`, `tabbing_identifier`, `name`, `in_app_hosts`). The active `SITE` const is chosen at compile time by `#[cfg(feature = "gemini")]`, defaulting to GitHub. The rest of the file is site-agnostic and reads `SITE.*`. Cargo features (`github`/`gemini`) are declared in `Cargo.toml`; `tauri.conf.json` is the GitHub base and `tauri.gemini.conf.json` deep-merges over it (via `--config`) to override `productName`, `identifier`, and `bundle.icon` (arrays are replaced, not merged). Gemini's icon set lives in `src-tauri/icons-gemini/` (regenerate with `pnpm tauri icon <png> -o src-tauri/icons-gemini`). Because the config dir is derived from `identifier`, each app gets its own `settings.json` and never collides. **To add a third site:** add a `#[cfg(feature = "…")]` `SITE`, a Cargo feature, a `tauri.<site>.conf.json`, an icon set, and a `case` arm in `scripts/deploy.sh` — no logic changes.
+
+**Tabs are windows.** Each tab is a separate `WebviewWindow` created by `create_tab`, all sharing the `SITE.tabbing_identifier` so macOS folds them into one native tab bar. On macOS, `create_tab` explicitly calls `add_as_tab` (raw `objc` `addTabbedWindow:ordered:`) to attach the new window to the focused one, because the tabbing identifier alone only merges windows when the system "Prefer tabs" setting is on. Tab labels are `tab-N` from the monotonic `TabCounter`.
 
 **Link routing** is the core behavior, enforced in two places on every window:
 - `on_navigation` — same-window clicks: GitHub hosts (see `is_github_host`) and non-http(s) schemes stay in-app; everything else is handed to the system browser via `open_external` and the in-app navigation is cancelled.

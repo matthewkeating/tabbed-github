@@ -14,6 +14,13 @@ edition = "2021"
 name = "tabbed_github_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Site profile selected at build time (see `SITE` in src/lib.rs). Default builds
+# the GitHub app; `--features gemini` builds the Gemini app from the same source.
+[features]
+default = ["github"]
+github = []
+gemini = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

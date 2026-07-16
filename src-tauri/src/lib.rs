@@ -2,7 +2,9 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{
+    AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+};
 use tauri::webview::NewWindowResponse;
 use tauri::{
     AppHandle, Manager, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
@@ -11,26 +13,60 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 
-/// The page every tab starts on.
-const START_URL: &str = "https://github.com/matthewkeating?tab=repositories";
-/// Shared macOS tabbing identifier: windows with the same id become native tabs.
-const TABBING_IDENTIFIER: &str = "github-tab";
+/// Per-site build profile. This app is a generic "native macOS tabs for one
+/// website" shell; only the values below differ between the sites we ship. The
+/// active profile is selected at compile time via Cargo features (`--features
+/// gemini`), defaulting to GitHub, so a single codebase produces both apps and
+/// every fix to the shared logic lands in both at once.
+struct Site {
+    /// The page every tab starts on.
+    start_url: &'static str,
+    /// Shared macOS tabbing identifier: windows with the same id become native tabs.
+    tabbing_identifier: &'static str,
+    /// Window title and application-menu name.
+    name: &'static str,
+    /// Host suffixes that stay in-app instead of being handed to the system
+    /// browser. Each entry matches that exact host and any of its subdomains.
+    in_app_hosts: &'static [&'static str],
+}
+
+#[cfg(not(feature = "gemini"))]
+const SITE: Site = Site {
+    start_url: "https://github.com/matthewkeating?tab=repositories",
+    tabbing_identifier: "github-tab",
+    name: "GitHub",
+    in_app_hosts: &["github.com", "githubusercontent.com", "githubassets.com"],
+};
+
+#[cfg(feature = "gemini")]
+const SITE: Site = Site {
+    start_url: "https://gemini.google.com/app",
+    tabbing_identifier: "gemini-tab",
+    name: "Gemini",
+    // Gemini itself, plus the Google domains its sign-in flow and static assets
+    // span. Broader than strictly necessary so login redirects never leak to the
+    // browser; trim if you want external Google links to open externally.
+    in_app_hosts: &[
+        "gemini.google.com",
+        "accounts.google.com",
+        "google.com",
+        "gstatic.com",
+        "googleusercontent.com",
+        "googleapis.com",
+    ],
+};
 
 /// Monotonic counter used to give each tab-window a unique label.
 struct TabCounter(AtomicU32);
 
-/// True when the URL points at GitHub or one of its asset hosts, i.e. it should
-/// stay inside the app rather than opening in the system browser.
-fn is_github_host(url: &Url) -> bool {
+/// True when the URL points at the active site or one of its asset/login hosts,
+/// i.e. it should stay inside the app rather than opening in the system browser.
+fn is_in_app_host(url: &Url) -> bool {
     match url.host_str() {
-        Some(host) => {
-            host == "github.com"
-                || host.ends_with(".github.com")
-                || host == "githubusercontent.com"
-                || host.ends_with(".githubusercontent.com")
-                || host == "githubassets.com"
-                || host.ends_with(".githubassets.com")
-        }
+        Some(host) => SITE
+            .in_app_hosts
+            .iter()
+            .any(|h| host == *h || host.ends_with(&format!(".{h}"))),
         None => false,
     }
 }
@@ -66,22 +102,22 @@ fn create_tab(app: &AppHandle, url: Url) -> tauri::Result<WebviewWindow> {
     let new_win_app = app.clone();
 
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
-        .title("GitHub")
+        .title(SITE.name)
         .inner_size(1200.0, 800.0)
-        .tabbing_identifier(TABBING_IDENTIFIER)
-        // Same-window navigation: keep GitHub in-app, send the rest to the browser.
+        .tabbing_identifier(SITE.tabbing_identifier)
+        // Same-window navigation: keep the site in-app, send the rest to the browser.
         .on_navigation(move |url| {
-            if is_github_host(url) || !is_http(url) {
+            if is_in_app_host(url) || !is_http(url) {
                 true
             } else {
                 open_external(&nav_app, url);
                 false
             }
         })
-        // window.open / target="_blank": GitHub opens a new in-app tab, the rest
+        // window.open / target="_blank": the site opens a new in-app tab, the rest
         // go to the browser. We deny the default and drive the outcome ourselves.
         .on_new_window(move |url, _features| {
-            if is_github_host(&url) {
+            if is_in_app_host(&url) {
                 let app = new_win_app.clone();
                 // Defer window creation off the delegate callback to avoid
                 // re-entering the event loop while it is still running.
@@ -193,10 +229,10 @@ fn toggle_devtools_on_focused(app: &AppHandle) {
 /// A self-contained "URL copied" toast injected into the focused page: it
 /// fades in, holds briefly, then fades out and removes itself. Uses a fixed id
 /// so repeated copies replace the previous toast instead of stacking. There is
-/// no DOM of our own to render into (tabs load github.com directly), so the
-/// overlay lives on the GitHub page itself.
+/// no DOM of our own to render into (tabs load the site directly), so the
+/// overlay lives on the site's own page.
 const TOAST_JS: &str = r#"(function () {
-  var id = '__tabbed_github_toast__';
+  var id = '__tabbed_site_toast__';
   var existing = document.getElementById(id);
   if (existing) existing.remove();
   var el = document.createElement('div');
@@ -438,18 +474,37 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .id("settings")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
-    let app_menu = SubmenuBuilder::new(app, "GitHub")
-        .about(None)
+
+    // macOS auto-labels the standard About/Hide/Quit items with the app's name,
+    // which it takes from the bundle/process identity (the `tabbed-github`
+    // executable name in an unbundled dev run), not from `SITE.name`. Pass
+    // explicit "{verb} {SITE.name}" text so the menu reads correctly in every
+    // build — GitHub or Gemini, bundled or launched straight from cargo.
+    let about = PredefinedMenuItem::about(
+        app,
+        Some(&format!("About {}", SITE.name)),
+        Some(AboutMetadata {
+            name: Some(SITE.name.into()),
+            ..Default::default()
+        }),
+    )?;
+    let services = PredefinedMenuItem::services(app, None)?;
+    let hide = PredefinedMenuItem::hide(app, Some(&format!("Hide {}", SITE.name)))?;
+    let hide_others = PredefinedMenuItem::hide_others(app, Some("Hide Others"))?;
+    let show_all = PredefinedMenuItem::show_all(app, Some("Show All"))?;
+    let quit = PredefinedMenuItem::quit(app, Some(&format!("Quit {}", SITE.name)))?;
+    let app_menu = SubmenuBuilder::new(app, SITE.name)
+        .item(&about)
         .separator()
         .item(&settings_item)
         .separator()
-        .services()
+        .item(&services)
         .separator()
-        .hide()
-        .hide_others()
-        .show_all()
+        .item(&hide)
+        .item(&hide_others)
+        .item(&show_all)
         .separator()
-        .quit()
+        .item(&quit)
         .build()?;
 
     let new_tab = MenuItemBuilder::new("New Tab")
@@ -545,7 +600,7 @@ pub fn run() {
                     } else if is_focus_new_tab {
                         let _ = app.run_on_main_thread(move || {
                             bring_app_forward(&handle);
-                            if let Ok(url) = START_URL.parse() {
+                            if let Ok(url) = SITE.start_url.parse() {
                                 let _ = create_tab(&handle, url);
                             }
                         });
@@ -558,7 +613,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_shortcuts, set_shortcuts])
         .on_menu_event(|app, event| match event.id().as_ref() {
             "new_tab" => {
-                if let Ok(url) = START_URL.parse() {
+                if let Ok(url) = SITE.start_url.parse() {
                     let _ = create_tab(app, url);
                 }
             }
@@ -573,7 +628,7 @@ pub fn run() {
         .setup(|app| {
             build_menu(app.handle())?;
             register_global_shortcuts(app.handle());
-            create_tab(app.handle(), START_URL.parse()?)?;
+            create_tab(app.handle(), SITE.start_url.parse()?)?;
             Ok(())
         })
         .run(tauri::generate_context!())

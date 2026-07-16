@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "scripts": {
     "tauri": "tauri",
-    "deploy": "bash scripts/deploy.sh"
+    "dev:gemini": "tauri dev --features gemini --config src-tauri/tauri.gemini.conf.json",
+    "deploy": "bash scripts/deploy.sh github",
+    "deploy:gemini": "bash scripts/deploy.sh gemini"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

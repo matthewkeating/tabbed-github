@@ -1,16 +1,37 @@
 #!/usr/bin/env bash
 #
-# Build GitHub.app and deploy it to ~/Applications.
+# Build one of the site apps and deploy it to ~/Applications.
+#
+# Usage: deploy.sh [github|gemini]   (defaults to github)
 #
 # Steps:
-#   1. Build the .app bundle via `pnpm tauri build --bundles app`.
+#   1. Build the .app bundle via `pnpm tauri build --bundles app`, passing the
+#      site's Cargo feature and (for non-default sites) its config overrides.
 #   2. If any instance of the app is running, quit it (gracefully, then force).
 #   3. Copy the freshly built .app into ~/Applications and clear quarantine.
 #
 set -euo pipefail
 
-APP_NAME="GitHub"
-BUNDLE_ID="com.matthewkeating.tabbed-github"
+SITE="${1:-github}"
+
+# Per-site build parameters. The shared Rust/config lives in one codebase; only
+# these values (and the referenced tauri.<site>.conf.json / icons) differ.
+case "$SITE" in
+  github)
+    APP_NAME="GitHub"
+    BUNDLE_ID="com.matthewkeating.tabbed-github"
+    BUILD_ARGS=()
+    ;;
+  gemini)
+    APP_NAME="Gemini"
+    BUNDLE_ID="com.matthewkeating.tabbed-gemini"
+    BUILD_ARGS=(--features gemini --config src-tauri/tauri.gemini.conf.json)
+    ;;
+  *)
+    echo "Error: unknown site \"$SITE\" (expected: github, gemini)" >&2
+    exit 1
+    ;;
+esac
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_APP="$ROOT_DIR/src-tauri/target/release/bundle/macos/${APP_NAME}.app"
@@ -24,7 +45,7 @@ DEST_APP="$DEST_DIR/${APP_NAME}.app"
 PROC_PATTERN="${APP_NAME}.app/Contents/MacOS/"
 
 echo "==> Building ${APP_NAME}.app ..."
-pnpm tauri build --bundles app
+pnpm tauri build --bundles app ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
 
 if [ ! -d "$SRC_APP" ]; then
   echo "Error: expected build output not found at $SRC_APP" >&2
