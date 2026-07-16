@@ -21,6 +21,15 @@ default = ["github"]
 github = []
 gemini = []
 
+# `objc`'s `msg_send!` expands to a `#[cfg(feature = "cargo-clippy")]` check for a
+# feature that no longer exists. A cfg inside a macro is evaluated against the
+# crate it expands into, so check-cfg tests it against *our* feature list and warns
+# on every `msg_send!`. Declaring it as an expected value silences those without
+# `allow`ing the lint, so a misspelled site feature is still caught. Removable if
+# the objc 0.2 dependency ever goes away.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

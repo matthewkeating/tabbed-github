@@ -37,6 +37,10 @@ chosen at compile time via a Cargo feature, defaulting to GitHub.
 - **Global hotkeys** — optional system-wide shortcuts to bring the app forward,
   or bring it forward and open a new tab. Configured in the Settings window and
   persisted across launches (applied live, no relaunch needed).
+- **Opens URLs from other apps** — the app registers as an http(s) handler, so
+  URL routers like [Velja](https://sindresorhus.com/velja) can send matching
+  links straight to it: click a GitHub link anywhere on your Mac and it opens as
+  a tab in `GitHub.app`. See [Opening links from other apps](#opening-links-from-other-apps).
 
 ## Prerequisites
 
@@ -85,6 +89,29 @@ local builds open without a warning.
 pnpm deploy             # build + install GitHub.app  → ~/Applications
 pnpm deploy:gemini      # build + install Gemini.app  → ~/Applications
 ```
+
+## Opening links from other apps
+
+The app declares itself an http(s) URL handler, so macOS will hand it links. On
+its own that changes nothing about your Mac — it doesn't make the app your
+browser, it just makes it a legal *target*. The point is to pair it with a URL
+router such as [Velja](https://sindresorhus.com/velja), which intercepts every
+link you click and picks an app based on the URL.
+
+### Notes
+
+- **Bundled builds only.** `pnpm dev` doesn't produce an `.app` bundle, and the
+  URL declaration lives in the bundle's `Info.plist`. Use a `pnpm deploy`'d build.
+- **If the app doesn't appear in your router's app list**, macOS may not have
+  noticed the declaration yet. Re-register it:
+
+  ```sh
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f ~/Applications/GitHub.app
+  ```
+
+- **You may see two "GitHub" entries.** The build output under
+  `src-tauri/target/release/bundle/macos/` registers itself too. Pick the one in
+  `~/Applications` — the other is replaced on every build.
 
 ## Adding a third site
 

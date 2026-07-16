@@ -1,6 +1,7 @@
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tauri::menu::{
     AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
@@ -58,6 +59,23 @@ const SITE: Site = Site {
 
 /// Monotonic counter used to give each tab-window a unique label.
 struct TabCounter(AtomicU32);
+
+/// Label of the tab `setup` opens at startup; the first label `next_label` hands out.
+const STARTUP_TAB_LABEL: &str = "tab-1";
+
+/// How long after launch an incoming URL is treated as the reason we were
+/// launched. Long enough to cover a cold start, short enough that a URL routed to
+/// an app the user opened themselves still gets a tab of its own.
+const STARTUP_TAB_REUSE_WINDOW: Duration = Duration::from_secs(2);
+
+/// Launch-time bookkeeping for the startup-tab reuse in `open_url_from_system`.
+struct Launch {
+    at: Instant,
+    /// Set once a URL has claimed the startup tab — either by reusing the one
+    /// `setup` opened or by being the tab that took its place. Ensures a second
+    /// URL in the same launch opens its own tab instead of replacing the first.
+    startup_tab_claimed: AtomicBool,
+}
 
 /// True when the URL points at the active site or one of its asset/login hosts,
 /// i.e. it should stay inside the app rather than opening in the system browser.
@@ -343,6 +361,61 @@ fn bring_app_forward(app: &AppHandle) {
     }
 }
 
+/// Claim the startup tab for a URL, returning it if it already exists and should
+/// be navigated rather than joined by a second tab.
+///
+/// A cold launch from a URL would otherwise leave a stray `start_url` tab next to
+/// the page actually asked for, because `setup` opens one unconditionally. The
+/// two events race — `RunEvent::Opened` is delivered before `setup` about as
+/// often as after — so this handles only the "setup won" half by handing back its
+/// tab; `setup` skips its own tab when it loses (see the `setup` hook). Claiming
+/// is one-shot either way, so a second URL in the same launch gets its own tab.
+///
+/// The launch window is a heuristic — nothing tells us "this URL is why you were
+/// launched" — but a benign one: the worst case is a URL arriving seconds after a
+/// manual launch replacing an untouched start page it would have covered anyway.
+fn startup_tab_to_reuse(app: &AppHandle) -> Option<WebviewWindow> {
+    let launch = app.state::<Launch>();
+    if launch.at.elapsed() > STARTUP_TAB_REUSE_WINDOW {
+        return None;
+    }
+    if launch.startup_tab_claimed.swap(true, Ordering::SeqCst) {
+        return None;
+    }
+    // No windows yet means `setup` hasn't run; the caller's new tab becomes the
+    // startup tab and `setup` will stand down. More than one means the user is
+    // already working in the app, so leave their tabs alone.
+    let mut windows = app.webview_windows();
+    if windows.len() != 1 {
+        return None;
+    }
+    windows.remove(STARTUP_TAB_LABEL)
+}
+
+/// Handle a URL the system asked us to open, e.g. from a URL router like Velja.
+/// Site URLs open in-app and the app comes forward; anything else is handed back
+/// to the browser, matching the in-app link routing. Note the bounce risk on that
+/// fallback: a router configured to send *every* URL here would get it straight
+/// back, so keep such rules scoped to the site's hosts.
+fn open_url_from_system(app: &AppHandle, url: Url) {
+    if !is_in_app_host(&url) {
+        if is_http(&url) {
+            open_external(app, &url);
+        }
+        return;
+    }
+
+    match startup_tab_to_reuse(app) {
+        Some(tab) => {
+            let _ = tab.navigate(url);
+        }
+        None => {
+            let _ = create_tab(app, url);
+        }
+    }
+    bring_app_forward(app);
+}
+
 /// Parse one optional accelerator string, treating blank as unset. Returns the
 /// trimmed string paired with its parsed `Shortcut`, or a message on a bad value.
 fn parse_shortcut(value: Option<String>) -> Result<Option<(String, Shortcut)>, String> {
@@ -609,6 +682,10 @@ pub fn run() {
                 .build(),
         )
         .manage(TabCounter(AtomicU32::new(1)))
+        .manage(Launch {
+            at: Instant::now(),
+            startup_tab_claimed: AtomicBool::new(false),
+        })
         .manage(Mutex::new(GlobalShortcuts::default()))
         .invoke_handler(tauri::generate_handler![get_shortcuts, set_shortcuts])
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -628,9 +705,23 @@ pub fn run() {
         .setup(|app| {
             build_menu(app.handle())?;
             register_global_shortcuts(app.handle());
-            create_tab(app.handle(), SITE.start_url.parse()?)?;
+            // A URL delivered at launch can be handled before this runs (see
+            // `startup_tab_to_reuse`), in which case it has already opened the
+            // tab the user asked for and a `start_url` tab would just be litter.
+            if app.webview_windows().is_empty() {
+                create_tab(app.handle(), SITE.start_url.parse()?)?;
+            }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // macOS handed us a URL to open (`application:openURLs:`), e.g. from a
+            // URL router like Velja. Route it by the same rule as an in-page link.
+            if let tauri::RunEvent::Opened { urls } = event {
+                for url in urls {
+                    open_url_from_system(app, url);
+                }
+            }
+        });
 }

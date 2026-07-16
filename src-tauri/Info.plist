@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Declares the app as an http(s) URL handler so LaunchServices will hand it
+	     URLs. Required by URL routers such as Velja, which can only target apps
+	     that advertise this. Received URLs arrive as `RunEvent::Opened` (see
+	     `run` in src/lib.rs). Merged into both site bundles by the Tauri bundler.
+	     `Alternate` rank means "capable of opening these", not "I am the default
+	     browser". -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.matthewkeating.tabbed-web-app.web</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>http</string>
+				<string>https</string>
+			</array>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+	</array>
+</dict>
+</plist>
