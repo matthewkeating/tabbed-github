@@ -1,4 +1,4 @@
-# GitHub
+# Tabbed GitHub
 
 A native macOS app that puts GitHub in system tabs (⌘T for a new tab).
 Links to GitHub stay in the app; everything else opens in your default browser.
