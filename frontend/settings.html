@@ -132,7 +132,14 @@
     <div class="footer" id="footer">Click a shortcut, then press your key combination.</div>
 
     <script>
-      const { invoke } = window.__TAURI__.core;
+      // `withGlobalTauri` is off (so github.com tabs get no Tauri API), but the
+      // low-level IPC bridge is always injected. Prefer the friendly wrapper if
+      // it is ever present, otherwise call the internals directly.
+      function invoke(cmd, args) {
+        const core = window.__TAURI__ && window.__TAURI__.core;
+        if (core && core.invoke) return core.invoke(cmd, args);
+        return window.__TAURI_INTERNALS__.invoke(cmd, args);
+      }
       const footer = document.getElementById("footer");
 
       // Current saved values, keyed by action.

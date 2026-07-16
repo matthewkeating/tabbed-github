@@ -367,23 +367,49 @@ fn register_global_shortcuts(app: &AppHandle) {
     );
 }
 
+/// Snapshot the live shortcuts as plain accelerator strings.
+fn current_values(shortcuts: &GlobalShortcuts) -> ShortcutValues {
+    ShortcutValues {
+        focus: shortcuts.focus.as_ref().map(|(s, _)| s.clone()),
+        focus_new_tab: shortcuts.focus_new_tab.as_ref().map(|(s, _)| s.clone()),
+    }
+}
+
+/// Reject command calls from any window other than our own settings window.
+/// `get_shortcuts`/`set_shortcuts` are application commands, which Tauri does not
+/// gate behind the capability ACL, so the untrusted github.com tabs share the
+/// same IPC surface. The window label is assigned by us at creation and cannot be
+/// spoofed by page content, making it a sound authorization check.
+fn require_settings_window(webview: &WebviewWindow) -> Result<(), String> {
+    if webview.label() == "settings" {
+        Ok(())
+    } else {
+        Err("Not authorized".to_string())
+    }
+}
+
 /// Command: the current hotkey accelerator strings, for populating the UI.
 #[tauri::command]
-fn get_shortcuts(state: State<'_, Mutex<GlobalShortcuts>>) -> ShortcutValues {
-    let guard = state.lock().unwrap();
-    ShortcutValues {
-        focus: guard.focus.as_ref().map(|(s, _)| s.clone()),
-        focus_new_tab: guard.focus_new_tab.as_ref().map(|(s, _)| s.clone()),
-    }
+fn get_shortcuts(
+    webview: WebviewWindow,
+    state: State<'_, Mutex<GlobalShortcuts>>,
+) -> Result<ShortcutValues, String> {
+    require_settings_window(&webview)?;
+    Ok(current_values(&state.lock().unwrap()))
 }
 
 /// Command: validate, apply, and persist new hotkeys from the settings window.
 /// Returns an error string the window can display when a value is rejected; on
 /// success the settings file mirrors exactly what was registered.
 #[tauri::command]
-fn set_shortcuts(app: AppHandle, values: ShortcutValues) -> Result<(), String> {
+fn set_shortcuts(
+    app: AppHandle,
+    webview: WebviewWindow,
+    values: ShortcutValues,
+) -> Result<(), String> {
+    require_settings_window(&webview)?;
     apply_shortcuts(&app, values)?;
-    let current = get_shortcuts(app.state::<Mutex<GlobalShortcuts>>());
+    let current = current_values(&app.state::<Mutex<GlobalShortcuts>>().lock().unwrap());
     save_settings(&app, current)
 }
 
