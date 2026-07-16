@@ -47,7 +47,7 @@ chosen at compile time via a Cargo feature, defaulting to GitHub.
 
 ```sh
 pnpm install            # installs the Tauri CLI (the only JS dependency)
-pnpm tauri dev          # run the GitHub app
+pnpm dev                # run the GitHub app
 pnpm dev:gemini         # run the Gemini app
 ```
 

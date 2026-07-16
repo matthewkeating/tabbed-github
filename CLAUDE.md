@@ -12,7 +12,7 @@ A native macOS app (Tauri v2) that wraps a website in system tabs. There is almo
 
 ```sh
 pnpm install                        # install the Tauri CLI (only JS dependency)
-pnpm tauri dev                      # run the GitHub app in development
+pnpm dev                            # run the GitHub app in development
 pnpm dev:gemini                     # run the Gemini app in development
 pnpm tauri build --bundles app      # build GitHub → target/release/bundle/macos/GitHub.app
 pnpm deploy                         # build + install GitHub.app to ~/Applications
