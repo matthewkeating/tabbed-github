@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ececec;
+        --card: #ffffff;
+        --text: #1d1d1f;
+        --muted: #86868b;
+        --border: #d6d6d6;
+        --key-bg: #f5f5f7;
+        --key-border: #cfcfd2;
+        --accent: #0a68ff;
+        --danger: #d1242f;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #232326;
+          --card: #2d2d31;
+          --text: #f5f5f7;
+          --muted: #98989d;
+          --border: #3a3a3e;
+          --key-bg: #3a3a3f;
+          --key-border: #4a4a50;
+          --accent: #3a86ff;
+          --danger: #ff6b6b;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 22px 24px;
+        font: 13px -apple-system, system-ui, sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      h1 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0 0 2px;
+      }
+      .subtitle {
+        color: var(--muted);
+        margin: 0 0 18px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+      }
+      .row + .row { border-top: 1px solid var(--border); }
+      .row .label { flex: 1; }
+      .row .label .name { font-weight: 500; }
+      .row .label .desc { color: var(--muted); font-size: 12px; margin-top: 1px; }
+      .recorder {
+        min-width: 108px;
+        text-align: center;
+        padding: 6px 12px;
+        border-radius: 7px;
+        border: 1px solid var(--key-border);
+        background: var(--key-bg);
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+        font-variant-numeric: tabular-nums;
+      }
+      .recorder:hover { border-color: var(--accent); }
+      .recorder.recording {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+        color: var(--accent);
+      }
+      .recorder.unset { color: var(--muted); }
+      .clear {
+        border: none;
+        background: transparent;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1;
+        cursor: pointer;
+        width: 20px;
+        padding: 0;
+        visibility: hidden;
+      }
+      .clear.show { visibility: visible; }
+      .clear:hover { color: var(--danger); }
+      .footer {
+        margin-top: 12px;
+        min-height: 16px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .footer.error { color: var(--danger); }
+    </style>
+  </head>
+  <body>
+    <h1>Global Shortcuts</h1>
+    <p class="subtitle">System-wide hotkeys that work even when the app is in the background.</p>
+
+    <div class="card">
+      <div class="row" data-action="focus">
+        <div class="label">
+          <div class="name">Bring app to front</div>
+          <div class="desc">Show and focus the frontmost tab</div>
+        </div>
+        <button class="recorder" type="button"></button>
+        <button class="clear" type="button" title="Remove shortcut">&times;</button>
+      </div>
+      <div class="row" data-action="focus_new_tab">
+        <div class="label">
+          <div class="name">Bring app to front &amp; new tab</div>
+          <div class="desc">Activate the app and open a new tab</div>
+        </div>
+        <button class="recorder" type="button"></button>
+        <button class="clear" type="button" title="Remove shortcut">&times;</button>
+      </div>
+    </div>
+
+    <div class="footer" id="footer">Click a shortcut, then press your key combination.</div>
+
+    <script>
+      const { invoke } = window.__TAURI__.core;
+      const footer = document.getElementById("footer");
+
+      // Current saved values, keyed by action.
+      let values = { focus: null, focus_new_tab: null };
+      // Which action (if any) is currently recording.
+      let recording = null;
+
+      const MOD_SYMBOLS = {
+        CmdOrCtrl: "⌘", Cmd: "⌘", Command: "⌘", Super: "⌘",
+        Ctrl: "⌃", Control: "⌃",
+        Alt: "⌥", Option: "⌥",
+        Shift: "⇧",
+      };
+      const KEY_LABELS = {
+        Space: "Space", Enter: "↩", Tab: "⇥", Backspace: "⌫",
+        Delete: "⌦", Escape: "⎋",
+        ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
+        Comma: ",", Period: ".", Slash: "/", Semicolon: ";", Quote: "'",
+        Backquote: "`", Backslash: "\\", BracketLeft: "[", BracketRight: "]",
+        Minus: "-", Equal: "=",
+      };
+      const MODIFIER_CODES = new Set([
+        "ControlLeft", "ControlRight", "ShiftLeft", "ShiftRight",
+        "AltLeft", "AltRight", "MetaLeft", "MetaRight", "CapsLock",
+      ]);
+
+      function keyLabel(code) {
+        if (KEY_LABELS[code]) return KEY_LABELS[code];
+        let m;
+        if ((m = /^Key([A-Z])$/.exec(code))) return m[1];
+        if ((m = /^Digit(\d)$/.exec(code))) return m[1];
+        if (/^F\d{1,2}$/.test(code)) return code;
+        return code;
+      }
+
+      // Render an accelerator string (e.g. "CmdOrCtrl+Shift+KeyG") as macOS symbols.
+      function formatAccel(accel) {
+        const tokens = accel.split("+");
+        const key = tokens.pop();
+        return tokens.map((t) => MOD_SYMBOLS[t] || t).join("") + keyLabel(key);
+      }
+
+      // Build an accelerator string from a keydown event, or null if it is not a
+      // usable combination yet (modifier-only, or no modifier on a normal key).
+      function buildAccel(e) {
+        if (MODIFIER_CODES.has(e.code)) return null;
+        const mods = [];
+        if (e.metaKey) mods.push("CmdOrCtrl");
+        if (e.ctrlKey) mods.push("Ctrl");
+        if (e.altKey) mods.push("Alt");
+        if (e.shiftKey) mods.push("Shift");
+        const isFunctionKey = /^F\d{1,2}$/.test(e.code);
+        if (mods.length === 0 && !isFunctionKey) return null;
+        return [...mods, e.code].join("+");
+      }
+
+      function setFooter(text, isError) {
+        footer.textContent = text;
+        footer.classList.toggle("error", !!isError);
+      }
+
+      function render() {
+        for (const row of document.querySelectorAll(".row")) {
+          const action = row.dataset.action;
+          const recorder = row.querySelector(".recorder");
+          const clear = row.querySelector(".clear");
+          if (recording === action) {
+            recorder.textContent = "Press keys…";
+            recorder.classList.add("recording");
+          } else {
+            recorder.classList.remove("recording");
+            const value = values[action];
+            recorder.textContent = value ? formatAccel(value) : "Click to set";
+            recorder.classList.toggle("unset", !value);
+          }
+          clear.classList.toggle("show", recording !== action && !!values[action]);
+        }
+      }
+
+      function stopRecording() {
+        recording = null;
+        render();
+      }
+
+      function startRecording(action) {
+        recording = action;
+        setFooter("Press a key combination, or Esc to cancel.");
+        render();
+      }
+
+      // Send the whole set to the backend; it validates, applies, and persists.
+      async function save(next) {
+        try {
+          await invoke("set_shortcuts", { values: next });
+          values = await invoke("get_shortcuts");
+          stopRecording();
+          setFooter("Saved.");
+        } catch (err) {
+          stopRecording();
+          setFooter(String(err), true);
+        }
+      }
+
+      document.addEventListener("click", (e) => {
+        const row = e.target.closest(".row");
+        if (!row) return;
+        const action = row.dataset.action;
+        if (e.target.classList.contains("clear")) {
+          save({ ...values, [action]: null });
+        } else if (e.target.classList.contains("recorder")) {
+          if (recording === action) stopRecording();
+          else startRecording(action);
+        }
+      });
+
+      window.addEventListener(
+        "keydown",
+        (e) => {
+          if (!recording) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.code === "Escape") {
+            stopRecording();
+            setFooter("Cancelled.");
+            return;
+          }
+          const accel = buildAccel(e);
+          if (accel) save({ ...values, [recording]: accel });
+        },
+        true
+      );
+
+      // Cancel recording if the window loses focus.
+      window.addEventListener("blur", () => {
+        if (recording) stopRecording();
+      });
+
+      invoke("get_shortcuts").then((v) => {
+        values = v;
+        render();
+      });
+    </script>
+  </body>
+</html>
