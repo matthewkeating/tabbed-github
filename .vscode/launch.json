@@ -1,0 +1,73 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "GitHub — Dev Debug",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--manifest-path=./src-tauri/Cargo.toml",
+          "--no-default-features",
+          "--features",
+          "github"
+        ]
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "GitHub — Release Debug",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--release",
+          "--manifest-path=./src-tauri/Cargo.toml",
+          "--no-default-features",
+          "--features",
+          "github"
+        ]
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Gemini — Dev Debug",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--manifest-path=./src-tauri/Cargo.toml",
+          "--no-default-features",
+          "--features",
+          "gemini"
+        ]
+      },
+      "env": {
+        "TAURI_CONFIG": "{\"productName\":\"Gemini\",\"identifier\":\"com.matthewkeating.tabbed-gemini\"}"
+      },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Gemini — Release Debug",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--release",
+          "--manifest-path=./src-tauri/Cargo.toml",
+          "--no-default-features",
+          "--features",
+          "gemini"
+        ]
+      },
+      "env": {
+        "TAURI_CONFIG": "{\"productName\":\"Gemini\",\"identifier\":\"com.matthewkeating.tabbed-gemini\"}"
+      },
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

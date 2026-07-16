@@ -17,6 +17,7 @@ scratch-icon.png
 
 # Editor directories and files
 .vscode/*
+!.vscode/launch.json
 !.vscode/extensions.json
 .idea
 .DS_Store
