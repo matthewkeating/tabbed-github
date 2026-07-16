@@ -1,4 +1,4 @@
-# Tabbed GitHub
+# Tabbed Web App
 
 A native macOS app (Tauri v2) that wraps a website in **system tabs** — the same
 native tab bar you get in Safari or Terminal, driven entirely by macOS. Press
