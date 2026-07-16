@@ -5,6 +5,7 @@ use tauri::webview::NewWindowResponse;
 use tauri::{
     AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_opener::OpenerExt;
 
 /// The page every tab starts on.
@@ -173,6 +174,64 @@ fn eval_on_focused(app: &AppHandle, js: &str) {
     }
 }
 
+/// Toggle the web inspector (devtools) on whichever tab currently has focus.
+fn toggle_devtools_on_focused(app: &AppHandle) {
+    for webview in app.webview_windows().values() {
+        if webview.is_focused().unwrap_or(false) {
+            if webview.is_devtools_open() {
+                webview.close_devtools();
+            } else {
+                webview.open_devtools();
+            }
+            return;
+        }
+    }
+}
+
+/// A self-contained "URL copied" toast injected into the focused page: it
+/// fades in, holds briefly, then fades out and removes itself. Uses a fixed id
+/// so repeated copies replace the previous toast instead of stacking. There is
+/// no DOM of our own to render into (tabs load github.com directly), so the
+/// overlay lives on the GitHub page itself.
+const TOAST_JS: &str = r#"(function () {
+  var id = '__tabbed_github_toast__';
+  var existing = document.getElementById(id);
+  if (existing) existing.remove();
+  var el = document.createElement('div');
+  el.id = id;
+  el.textContent = 'URL copied';
+  el.style.cssText = [
+    'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
+    'z-index:2147483647', 'background:rgba(0,0,0,0.82)', 'color:#fff',
+    'padding:10px 18px', 'border-radius:8px',
+    'font:13px -apple-system,system-ui,sans-serif',
+    'box-shadow:0 4px 14px rgba(0,0,0,0.35)', 'pointer-events:none',
+    'opacity:0', 'transition:opacity 0.2s ease'
+  ].join(';');
+  document.body.appendChild(el);
+  requestAnimationFrame(function () { el.style.opacity = '1'; });
+  setTimeout(function () {
+    el.style.opacity = '0';
+    setTimeout(function () { el.remove(); }, 300);
+  }, 1200);
+})();"#;
+
+/// Copy the focused tab's current page URL to the system clipboard, then show a
+/// brief "URL copied" toast on that page. The URL is read straight from the
+/// webview (no JS round-trip), so it reflects the live location after redirects
+/// and client-side navigation.
+fn copy_focused_url(app: &AppHandle) {
+    for webview in app.webview_windows().values() {
+        if webview.is_focused().unwrap_or(false) {
+            if let Ok(url) = webview.url() {
+                let _ = app.clipboard().write_text(url.to_string());
+                let _ = webview.eval(TOAST_JS);
+            }
+            return;
+        }
+    }
+}
+
 /// Build the macOS application menu. Custom items (New Tab, Back, Forward) carry
 /// accelerators and are dispatched in the menu event handler; the rest are
 /// standard predefined items so copy/paste, close, minimize, etc. keep working.
@@ -198,6 +257,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .close_window()
         .build()?;
 
+    let copy_url = MenuItemBuilder::new("Copy URL")
+        .id("copy_url")
+        .accelerator("CmdOrCtrl+L")
+        .build(app)?;
     let edit_menu = SubmenuBuilder::new(app, "Edit")
         .undo()
         .redo()
@@ -206,6 +269,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .copy()
         .paste()
         .select_all()
+        .separator()
+        .item(&copy_url)
         .build()?;
 
     let back = MenuItemBuilder::new("Back")
@@ -216,9 +281,20 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .id("forward")
         .accelerator("CmdOrCtrl+]")
         .build(app)?;
+    let reload = MenuItemBuilder::new("Reload")
+        .id("reload")
+        .accelerator("CmdOrCtrl+R")
+        .build(app)?;
+    let inspector = MenuItemBuilder::new("Toggle Web Inspector")
+        .id("inspector")
+        .accelerator("Alt+CmdOrCtrl+I")
+        .build(app)?;
     let history_menu = SubmenuBuilder::new(app, "History")
         .item(&back)
         .item(&forward)
+        .separator()
+        .item(&reload)
+        .item(&inspector)
         .build()?;
 
     let window_menu = SubmenuBuilder::new(app, "Window")
@@ -239,6 +315,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(TabCounter(AtomicU32::new(1)))
         .on_menu_event(|app, event| match event.id().as_ref() {
             "new_tab" => {
@@ -248,6 +325,9 @@ pub fn run() {
             }
             "back" => eval_on_focused(app, "history.back()"),
             "forward" => eval_on_focused(app, "history.forward()"),
+            "reload" => eval_on_focused(app, "location.reload()"),
+            "inspector" => toggle_devtools_on_focused(app),
+            "copy_url" => copy_focused_url(app),
             _ => {}
         })
         .setup(|app| {
